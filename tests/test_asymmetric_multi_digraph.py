@@ -11,6 +11,8 @@ from dspy.graph.storage import (
     AdjecencyMatrixGraphStorage,
     LinkedListGraphStorage,
 )
+from types import NoneType
+
 from dspy.graph.types import Edge, EdgeID, GraphStorageProvider, Vertex, VertexID
 
 STORAGE_PROVIDERS = [
@@ -179,7 +181,7 @@ class TestConstructWithProperties:
     def test_each_vertex_gets_own_property(self, storage: GraphStorageProvider) -> None:
         """Property factory called per-vertex, not shared."""
         v0, v1 = Vertex(VertexID(0)), Vertex(VertexID(1))
-        g = AsymmetricMultiDiGraph(
+        g: AsymmetricMultiDiGraph[list] = AsymmetricMultiDiGraph(
             storage,
             vertices=[v0, v1],
             vertex_property=list,
@@ -196,7 +198,7 @@ class TestConstructWithProperties:
             Edge((EdgeID(0), v0, v1)),
             Edge((EdgeID(1), v0, v1)),
         ]
-        g = AsymmetricMultiDiGraph(
+        g: AsymmetricMultiDiGraph[NoneType, list] = AsymmetricMultiDiGraph(
             storage,
             vertices=[v0, v1],
             edges=edges_in,

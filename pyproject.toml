@@ -58,6 +58,7 @@ python = ["3.13"]
 
 [tool.hatch.envs.types]
 dependencies = [
+  "pytest",
   "ty>=0.0.36",
 ]
 [tool.hatch.envs.types.scripts]
