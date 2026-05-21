@@ -21,6 +21,9 @@ classifiers = [
 ]
 dependencies = []
 
+[project.optional-dependencies]
+vectorize = ["numpy"]
+
 [project.urls]
 Documentation = "https://github.com/unknown/dspy#readme"
 Issues = "https://github.com/unknown/dspy/issues"
@@ -34,6 +37,10 @@ dependencies = [
   "coverage[toml]>=6.5",
   "pytest",
 ]
+features = [
+  "vectorize"
+]
+
 [tool.hatch.envs.default.scripts]
 test = "pytest {args:tests}"
 test-cov = "coverage run -m pytest {args:tests}"
@@ -56,6 +63,19 @@ dependencies = [
 [tool.hatch.envs.types.scripts]
 check = "ty check {args:src/dspy tests}"
 watch = "ty check --watch {args:src/dspy tests}"
+
+[tool.hatch.envs.hatch-static-analysis]
+config-path = "pyproject.toml"
+
+[tool.ruff]
+line-length = 88
+
+[tool.ruff.lint]
+select = ["ALL"]
+ignore = [
+  "D211",  # no-blank-line-before-class
+  "D213",  # multi-line-summary-second-line
+]
 
 [tool.coverage.run]
 source_pkgs = ["dspy", "tests"]
