@@ -1,4 +1,8 @@
-"""Tests for AsymmetricMultiDiGraph construction."""
+"""Tests for AsymmetricMultiDiGraph construction.
+
+:copyright: 2026-present Harsh Parekh <harsh_parekh@outlook.com>
+:license: MIT, see LICENSE.txt for details.
+"""
 
 import pytest
 
