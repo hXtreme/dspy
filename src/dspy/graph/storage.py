@@ -2,8 +2,6 @@ import itertools
 from collections.abc import Iterable
 from typing import Self, cast
 
-import numpy as np
-
 from dspy.graph.types import EdgeID, EdgeMonad, GraphStorage, VertexID
 
 
@@ -24,6 +22,8 @@ class IdentityEdgeMonad(EdgeMonad):
 
 
 try:
+    import numpy as np
+
     class _AdjecencyMatrixGraphStorage[EM: EdgeMonad](GraphStorage[EM]):
         _n: int
         _edge_monad: type[EM]

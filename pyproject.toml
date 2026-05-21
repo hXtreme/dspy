@@ -73,8 +73,16 @@ line-length = 88
 [tool.ruff.lint]
 select = ["ALL"]
 ignore = [
-  "D211",  # no-blank-line-before-class
-  "D213",  # multi-line-summary-second-line
+  "COM812", # trailing commas conflict with formatter
+  "D203",   # blank-line-before-class-docstring (conflicts with formatter)
+  "D211",   # no-blank-line-before-class
+  "D213",   # multi-line-summary-second-line
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = [
+  "S101",    # assert is expected in tests
+  "PLR2004", # magic values are fine in tests
 ]
 
 [tool.coverage.run]
