@@ -33,6 +33,7 @@ Source = "https://github.com/unknown/dspy"
 path = "src/dspy/__about__.py"
 
 [tool.hatch.envs.default]
+installer = "uv"
 dependencies = [
   "coverage[toml]>=6.5",
   "pytest",
@@ -57,6 +58,7 @@ cov = [
 python = ["3.13"]
 
 [tool.hatch.envs.types]
+installer = "uv"
 dependencies = [
   "pytest",
   "ty>=0.0.36",
@@ -66,6 +68,7 @@ check = "ty check {args:src/dspy tests}"
 watch = "ty check --watch {args:src/dspy tests}"
 
 [tool.hatch.envs.hatch-static-analysis]
+installer = "uv"
 config-path = "pyproject.toml"
 
 [tool.ruff]
