@@ -1,9 +1,13 @@
 """Graph storage backend implementations.
 
-Provides concrete :class:`GraphStorage` implementations using different
-underlying data structures:
+Provides concrete :class:`~dspy.graph.types.GraphStorage` implementations
+using different underlying data structures, plus the simple-graph edge
+monad they can be parameterised with:
 
-* :data:`AdjecencyMatrixGraphStorage` -- backed by a 2-D matrix (uses NumPy
+* :class:`IdentityEdgeMonad` -- an :class:`~dspy.graph.types.EdgeMonad`
+  that keeps only the most recently chained :class:`EdgeID` (simple
+  graph semantics).
+* :data:`AdjacencyMatrixGraphStorage` -- backed by a 2-D matrix (uses NumPy
   when available, falls back to nested Python lists).
 * :data:`LinkedListGraphStorage` -- backed by per-vertex adjacency lists.
 
@@ -12,7 +16,7 @@ underlying data structures:
 """
 
 from collections.abc import Iterable
-from typing import Self, cast
+from typing import Self, cast, override
 
 from dspy.graph.types import EdgeID, EdgeMonad, GraphStorage, VertexID
 
@@ -27,6 +31,7 @@ class IdentityEdgeMonad(EdgeMonad):
 
     _e: EdgeID
 
+    @override
     def __init__(self, e: EdgeID) -> None:
         """Initialise the monad with a single edge identifier.
 
@@ -34,6 +39,7 @@ class IdentityEdgeMonad(EdgeMonad):
         """
         self._e = e
 
+    @override
     def chain(self, e: EdgeID) -> Self:
         """Replace the stored edge identifier with *e*.
 
@@ -43,6 +49,7 @@ class IdentityEdgeMonad(EdgeMonad):
         self._e = e
         return self
 
+    @override
     def unwrap(self) -> Iterable[EdgeID]:
         """Return the single stored edge identifier as a one-element tuple.
 
@@ -50,6 +57,7 @@ class IdentityEdgeMonad(EdgeMonad):
         """
         return (self._e,)
 
+    @override
     def __str__(self) -> str:
         """Return the string form of the single stored edge identifier.
 
@@ -61,7 +69,7 @@ class IdentityEdgeMonad(EdgeMonad):
 try:
     import numpy as np
 
-    class _AdjecencyMatrixGraphStorage[EM: EdgeMonad](GraphStorage[EM]):
+    class _AdjacencyMatrixGraphStorage(GraphStorage):
         """NumPy-backed adjacency-matrix storage for an ``n``-vertex graph.
 
         Holds an ``n x n`` object matrix whose ``[u, v]`` cell is either
@@ -74,11 +82,11 @@ try:
         """
 
         _n: int
-        _edge_monad: type[EM]
+        _edge_monad: type[EdgeMonad]
         _vertices: np.ndarray[tuple[int], np.dtype[np.bool]]
         _matrix: np.ndarray[tuple[int, int], np.dtype[np.object_]]
 
-        def __init__(self, n: int, edge_monad: type[EM]) -> None:
+        def __init__(self, n: int, edge_monad: type[EdgeMonad]) -> None:
             """Allocate the vertex mask and an empty ``n x n`` matrix.
 
             :param n: Number of vertex slots to reserve.  All slots start
@@ -91,7 +99,8 @@ try:
             self._vertices = np.ones((n,)).astype(bool)
             self._matrix = np.full((n, n), None, dtype="object")
 
-        def update_edge(self, u: VertexID, v: VertexID, value: EdgeID) -> EM:
+        @override
+        def update_edge(self, u: VertexID, v: VertexID, value: EdgeID) -> EdgeMonad:
             """Insert or update the edge monad at cell ``(u, v)``.
 
             If the cell is empty a fresh monad is bound from *value*;
@@ -106,6 +115,7 @@ try:
             self._matrix[u, v] = new_edge
             return new_edge
 
+        @override
         def vertices(self) -> Iterable[VertexID]:
             """Return the identifiers of all currently active vertex slots.
 
@@ -114,14 +124,16 @@ try:
             """
             return np.arange(self._n)[self._vertices]
 
-        def _edges(self) -> Iterable[tuple[VertexID, VertexID, EM]]:
+        @override
+        def _edges(self) -> Iterable[tuple[VertexID, VertexID, EdgeMonad]]:
             for u in self.vertices():
                 yield from self._outgoing_edges(u)
 
+        @override
         def _incoming_edges(
             self,
             v: VertexID,
-        ) -> Iterable[tuple[VertexID, VertexID, EM]]:
+        ) -> Iterable[tuple[VertexID, VertexID, EdgeMonad]]:
             column: np.ndarray[tuple[int], np.dtype[np.object_]] = self._matrix[:, v]
             mask = (
                 cast(
@@ -138,13 +150,14 @@ try:
                 "np.ndarray[tuple[int], np.dtype[np.int64]]",
                 np.arange(self._n)[mask],
             )
-            values: Iterable[EM] = column[mask]
+            values: Iterable[EdgeMonad] = column[mask]
             return zip(source, destination, values, strict=True)
 
+        @override
         def _outgoing_edges(
             self,
             u: VertexID,
-        ) -> Iterable[tuple[VertexID, VertexID, EM]]:
+        ) -> Iterable[tuple[VertexID, VertexID, EdgeMonad]]:
             row: np.ndarray[tuple[int], np.dtype[np.object_]] = self._matrix[u]
             mask = (
                 cast(
@@ -161,11 +174,11 @@ try:
                 "np.ndarray[tuple[int], np.dtype[np.int64]]",
                 np.arange(self._n)[mask],
             )
-            values: Iterable[EM] = row[mask]
+            values: Iterable[EdgeMonad] = row[mask]
             return zip(source, destination, values, strict=True)
 except ImportError:
 
-    class _AdjecencyMatrixGraphStorage[EM: EdgeMonad](GraphStorage[EM]):
+    class _AdjacencyMatrixGraphStorage(GraphStorage):
         """Pure-Python adjacency-matrix storage used when NumPy is absent.
 
         Mirrors the NumPy variant's contract: an ``n x n`` matrix whose
@@ -175,11 +188,11 @@ except ImportError:
         """
 
         _n: int
-        _edge_monad: type[EM]
+        _edge_monad: type[EdgeMonad]
         _vertices: set[VertexID]
-        _matrix: list[list[EM | None]]
+        _matrix: list[list[EdgeMonad | None]]
 
-        def __init__(self, n: int, edge_monad: type[EM]) -> None:
+        def __init__(self, n: int, edge_monad: type[EdgeMonad]) -> None:
             """Allocate the active-vertex set and an empty matrix.
 
             :param n: Number of vertex slots to reserve.  Identifiers
@@ -192,7 +205,8 @@ except ImportError:
             self._vertices = set(map(VertexID, range(n)))
             self._matrix = [[None] * n for _ in range(n)]
 
-        def update_edge(self, u: VertexID, v: VertexID, value: EdgeID) -> EM:
+        @override
+        def update_edge(self, u: VertexID, v: VertexID, value: EdgeID) -> EdgeMonad:
             """Insert or update the edge monad at cell ``(u, v)``.
 
             If the cell is empty a fresh monad is bound from *value*;
@@ -207,6 +221,7 @@ except ImportError:
             self._matrix[u][v] = new_edge
             return new_edge
 
+        @override
         def vertices(self) -> Iterable[VertexID]:
             """Return a snapshot of the currently active vertex set.
 
@@ -215,24 +230,27 @@ except ImportError:
             """
             return frozenset(self._vertices)
 
-        def _edges(self) -> Iterable[tuple[VertexID, VertexID, EM]]:
+        @override
+        def _edges(self) -> Iterable[tuple[VertexID, VertexID, EdgeMonad]]:
             for u in self.vertices():
                 yield from self._outgoing_edges(u)
 
+        @override
         def _incoming_edges(
             self,
             v: VertexID,
-        ) -> Iterable[tuple[VertexID, VertexID, EM]]:
+        ) -> Iterable[tuple[VertexID, VertexID, EdgeMonad]]:
             return [
                 (u, v, val)
                 for u in self._vertices
                 if (val := self._matrix[u][v]) is not None
             ]
 
+        @override
         def _outgoing_edges(
             self,
             u: VertexID,
-        ) -> Iterable[tuple[VertexID, VertexID, EM]]:
+        ) -> Iterable[tuple[VertexID, VertexID, EdgeMonad]]:
             return [
                 (u, v, val)
                 for v in self._vertices
@@ -240,23 +258,23 @@ except ImportError:
             ]
 
 
-class _LinkedListGraphStorage[EM: EdgeMonad](GraphStorage[EM]):
+class _LinkedListGraphStorage(GraphStorage):
     """Adjacency-list storage for an ``n``-vertex graph.
 
     Each vertex ``u`` owns a Python list of ``(destination, EdgeMonad)``
     pairs.  Inserting an edge updates the existing pair for the same
     destination when present, otherwise appends a new pair.
 
-    Compared with :class:`_AdjecencyMatrixGraphStorage` this trades
+    Compared with :class:`_AdjacencyMatrixGraphStorage` this trades
     constant-time random access for sparse-graph memory savings.
     """
 
     _n: int
-    _edge_monad: type[EM]
+    _edge_monad: type[EdgeMonad]
     _vertices: set[VertexID]
-    _matrix: list[list[tuple[VertexID, EM]]]
+    _matrix: list[list[tuple[VertexID, EdgeMonad]]]
 
-    def __init__(self, n: int, edge_monad: type[EM]) -> None:
+    def __init__(self, n: int, edge_monad: type[EdgeMonad]) -> None:
         """Allocate the active-vertex set and an empty adjacency list.
 
         :param n: Number of vertex slots to reserve.  Identifiers ``0``
@@ -269,7 +287,8 @@ class _LinkedListGraphStorage[EM: EdgeMonad](GraphStorage[EM]):
         self._vertices = set(map(VertexID, range(n)))
         self._matrix = [[] for _ in range(n)]
 
-    def update_edge(self, u: VertexID, v: VertexID, value: EdgeID) -> EM:
+    @override
+    def update_edge(self, u: VertexID, v: VertexID, value: EdgeID) -> EdgeMonad:
         """Insert or update the edge monad for the ``(u, v)`` pair.
 
         Scans ``u``'s adjacency list for an existing entry with
@@ -295,6 +314,7 @@ class _LinkedListGraphStorage[EM: EdgeMonad](GraphStorage[EM]):
         self._matrix[u][idx] = new_edge
         return new_edge[1]
 
+    @override
     def vertices(self) -> Iterable[VertexID]:
         """Return a snapshot of the currently active vertex set.
 
@@ -302,18 +322,25 @@ class _LinkedListGraphStorage[EM: EdgeMonad](GraphStorage[EM]):
         """
         return frozenset(self._vertices)
 
-    def _edges(self) -> Iterable[tuple[VertexID, VertexID, EM]]:
+    @override
+    def _edges(self) -> Iterable[tuple[VertexID, VertexID, EdgeMonad]]:
         for u, u_v_edges in enumerate(self._matrix):
             if u not in self._vertices:
                 continue
             yield from ((u, v, value) for v, value in u_v_edges)
 
-    def _incoming_edges(self, v: VertexID) -> Iterable[tuple[VertexID, VertexID, EM]]:
+    @override
+    def _incoming_edges(
+        self, v: VertexID
+    ) -> Iterable[tuple[VertexID, VertexID, EdgeMonad]]:
         yield from ((u, w, value) for u, w, value in self._edges() if v == w)
 
-    def _outgoing_edges(self, u: VertexID) -> Iterable[tuple[VertexID, VertexID, EM]]:
+    @override
+    def _outgoing_edges(
+        self, u: VertexID
+    ) -> Iterable[tuple[VertexID, VertexID, EdgeMonad]]:
         yield from ((u, v, val) for v, val in self._matrix[u])
 
 
-AdjecencyMatrixGraphStorage: type[GraphStorage] = _AdjecencyMatrixGraphStorage
+AdjacencyMatrixGraphStorage: type[GraphStorage] = _AdjacencyMatrixGraphStorage
 LinkedListGraphStorage: type[GraphStorage] = _LinkedListGraphStorage

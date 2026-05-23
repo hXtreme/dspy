@@ -1,8 +1,14 @@
 """Concrete graph implementations.
 
-Contains :class:`AsymmetricMultiDiGraph`, an asymmetric directed multi-graph
-that allows multiple parallel edges between any ordered pair of vertices,
-with optional per-vertex and per-edge properties.
+Defines:
+
+* :class:`GenericDiGraph` -- a directed graph generic over the
+  :class:`~dspy.graph.types.EdgeMonad` chosen by its storage backend,
+  with optional per-vertex and per-edge properties.
+* :class:`AsymmetricMultiDiGraph` -- a thin :class:`GenericDiGraph`
+  subclass that wires storage to :class:`_MultiGraphEdgeMonad`, so
+  multiple parallel edges between the same ordered vertex pair are
+  retained.
 
 :copyright: 2026-present Harsh Parekh <harsh_parekh@outlook.com>
 :license: MIT, see LICENSE.txt for details.
@@ -12,7 +18,7 @@ import textwrap
 import typing
 from collections.abc import Iterable
 from types import NoneType
-from typing import TYPE_CHECKING, Self
+from typing import TYPE_CHECKING, Self, override
 
 from dspy.graph.types import (
     Edge,
@@ -38,15 +44,17 @@ class _MultiGraphEdgeMonad(EdgeMonad):
 
     _e: set[EdgeID]
 
-    def __init__(self, e: EdgeID | set[EdgeID]) -> None:
+    @override
+    def __init__(self, e: EdgeID) -> None:
         """Initialise the monad with one or more edge identifiers.
 
         :param e: Either a single :class:`EdgeID` (wrapped into a new
             one-element set) or an existing set of edge identifiers that
             is adopted directly.
         """
-        self._e = e if isinstance(e, set) else {e}
+        self._e = {e}
 
+    @override
     def chain(self, e: EdgeID) -> Self:
         """Add an additional edge identifier to this monad.
 
@@ -56,6 +64,7 @@ class _MultiGraphEdgeMonad(EdgeMonad):
         self._e.add(e)
         return self
 
+    @override
     def unwrap(self) -> Iterable[EdgeID]:
         """Return all accumulated edge identifiers as a frozen set.
 
@@ -63,6 +72,7 @@ class _MultiGraphEdgeMonad(EdgeMonad):
         """
         return frozenset(self._e)
 
+    @override
     def __str__(self) -> str:
         """Return the ``repr`` of the underlying edge-identifier set.
 
@@ -75,17 +85,20 @@ def _none_property() -> None:
     return None
 
 
-class AsymmetricMultiDiGraph[VertexProp = NoneType, EdgeProp = NoneType](
-    Graph[_MultiGraphEdgeMonad, VertexProp, EdgeProp],
+class GenericDiGraph[VertexProp = NoneType, EdgeProp = NoneType](
+    Graph[VertexProp, EdgeProp],
 ):
-    """Asymmetric directed multi-graph with optional vertex and edge properties.
+    """Directed graph with pluggable storage and optional vertex/edge properties.
 
-    An asymmetric directed multi-graph where:
+    A directed graph where:
 
     * Edges are directed -- an edge from *u* to *v* does **not** imply an
       edge from *v* to *u*.
-    * Multiple parallel edges between the same ordered vertex pair are
-      permitted (multi-graph semantics).
+    * Whether multiple parallel edges between the same ordered vertex
+      pair are retained, collapsed, or replaced is decided by the
+      :class:`~dspy.graph.types.EdgeMonad` that the storage backend is
+      built with (see :class:`AsymmetricMultiDiGraph` for the multi-edge
+      variant).
     * Each vertex and each edge can carry an associated property object
       whose type is determined by the *VertexProp* and *EdgeProp* type
       parameters respectively.
@@ -103,24 +116,28 @@ class AsymmetricMultiDiGraph[VertexProp = NoneType, EdgeProp = NoneType](
     __vertices: dict[Vertex, VertexID]
     __edges: dict[EdgeID, Edge]
     __inv_vertices: dict[VertexID, Vertex]
-    __storage: GraphStorage[_MultiGraphEdgeMonad]
+    __storage: GraphStorage
     __vertex_properties: dict[Vertex, VertexProp]
     __edge_properties: dict[EdgeID, EdgeProp]
     __vertex_property_constructor: PropertyConstructor[VertexProp]
     __edge_property_constructor: PropertyConstructor[EdgeProp]
 
+    @override
     def __init__(
         self,
-        storage: GraphStorageProvider[_MultiGraphEdgeMonad],
+        storage: GraphStorageProvider,
         vertices: Iterable[Vertex] | int = 0,
         edges: Iterable[Edge] | None = None,
         vertex_property: PropertyConstructor[VertexProp] | None = None,
         edge_property: PropertyConstructor[EdgeProp] | None = None,
     ) -> None:
-        """Construct a new asymmetric directed multi-graph.
+        """Construct a new directed graph backed by *storage*.
 
-        :param storage: A callable that creates a :class:`GraphStorage` backend
-            given a vertex count and the :class:`_MultiGraphEdgeMonad` type.
+        :param storage: A :data:`GraphStorageProvider` callable that
+            returns a :class:`GraphStorage` backend when invoked with the
+            vertex count.  The provider also fixes the
+            :class:`~dspy.graph.types.EdgeMonad` used to compose parallel
+            edges.
         :param vertices: Either an integer count (vertices are auto-generated as
             ``Vertex(0)`` through ``Vertex(n-1)``), or an
             explicit iterable of :class:`Vertex` objects.
@@ -153,13 +170,30 @@ class AsymmetricMultiDiGraph[VertexProp = NoneType, EdgeProp = NoneType](
             v: self.__vertex_property_constructor() for v in self.__vertices
         }
 
-        self.__storage = storage(len(self.__vertices), _MultiGraphEdgeMonad)
+        self.__storage = storage(len(self.__vertices))
         self.__edges: dict[EdgeID, Edge] = {}
         for edge in edges or ():
             self._add_edge(edge)
         self.__edge_properties = {
             e: self.__edge_property_constructor() for e in self.__edges
         }
+
+    @classmethod
+    def _construct(
+        cls,
+        storage: GraphStorageProvider,
+        vertices: Iterable[Vertex] | int = 0,
+        edges: Iterable[Edge] | None = None,
+        vertex_property: PropertyConstructor[VertexProp] | None = None,
+        edge_property: PropertyConstructor[EdgeProp] | None = None,
+    ) -> Self:
+        return cls(
+            storage=storage,
+            vertices=vertices,
+            edges=edges,
+            vertex_property=vertex_property,
+            edge_property=edge_property,
+        )
 
     def _add_edge(self, edge: Edge) -> None:
         """Validate *edge* and record it in storage and the edge table.
@@ -172,7 +206,7 @@ class AsymmetricMultiDiGraph[VertexProp = NoneType, EdgeProp = NoneType](
         edge_id, u, v = edge
         if existing := self.__edges.get(edge_id):
             error_msg = (
-                f"Edge already exists: Faild to add Edge{edge!r}, "
+                f"Edge already exists: Failed to add Edge{edge!r}, "
                 f"there is already an Edge{existing!r} with the same id"
             )
             raise KeyError(error_msg)
@@ -191,6 +225,7 @@ class AsymmetricMultiDiGraph[VertexProp = NoneType, EdgeProp = NoneType](
         self.__edges[edge_id] = edge
 
     # Building blocks
+    @override
     def vertices(self) -> Iterable[Vertex]:
         """Return all vertices in the graph.
 
@@ -198,6 +233,7 @@ class AsymmetricMultiDiGraph[VertexProp = NoneType, EdgeProp = NoneType](
         """
         return self.__vertices.keys()
 
+    @override
     def edges(self, vertex: Vertex | None = None) -> Iterable[Edge]:
         """Return edges in the graph, optionally filtered by source vertex.
 
@@ -219,6 +255,7 @@ class AsymmetricMultiDiGraph[VertexProp = NoneType, EdgeProp = NoneType](
         )
 
     # Connectivity
+    @override
     def incoming_edges(self, vertex: Vertex) -> Iterable[Edge]:
         """Return all edges whose destination is *vertex*.
 
@@ -230,6 +267,7 @@ class AsymmetricMultiDiGraph[VertexProp = NoneType, EdgeProp = NoneType](
             (e, self.__inv_vertices[u], self.__inv_vertices[v]) for u, v, e in raw_edges
         )
 
+    @override
     def outgoing_edges(self, vertex: Vertex) -> Iterable[Edge]:
         """Return all edges whose source is *vertex*.
 
@@ -247,6 +285,7 @@ class AsymmetricMultiDiGraph[VertexProp = NoneType, EdgeProp = NoneType](
     @typing.overload
     def property(self, item: Edge) -> EdgeProp: ...
 
+    @override
     def property(self, item: Vertex | Edge) -> VertexProp | EdgeProp:
         """Retrieve the property associated with a vertex or edge.
 
@@ -267,6 +306,7 @@ class AsymmetricMultiDiGraph[VertexProp = NoneType, EdgeProp = NoneType](
         )
         raise TypeError(error_msg)
 
+    @override
     def __str__(self) -> str:
         """Return a multi-line human-readable summary of the graph.
 
@@ -317,4 +357,62 @@ class AsymmetricMultiDiGraph[VertexProp = NoneType, EdgeProp = NoneType](
             vertices=vertices,
             edges=edges,
             storage=storage,
+        )
+
+
+class AsymmetricMultiDiGraph[VertexProp = NoneType, EdgeProp = NoneType](
+    GenericDiGraph[VertexProp, EdgeProp],
+):
+    """Asymmetric directed multi-graph wired to :class:`_MultiGraphEdgeMonad`.
+
+    Thin convenience subclass of :class:`GenericDiGraph` that fixes the
+    edge-monad type to :class:`_MultiGraphEdgeMonad`, so multiple parallel
+    edges between the same ordered vertex pair are retained.  Callers pass
+    a :class:`GraphStorage` *class* (not a provider callable); this class
+    builds the provider internally.
+
+    :param VertexProp: Type of per-vertex property values (default
+        :class:`NoneType`).
+    :param EdgeProp: Type of per-edge property values (default
+        :class:`NoneType`).
+    """
+
+    @override
+    def __init__(
+        self,
+        storage: type[GraphStorage],
+        vertices: Iterable[Vertex] | int = 0,
+        edges: Iterable[Edge] | None = None,
+        vertex_property: PropertyConstructor[VertexProp] | None = None,
+        edge_property: PropertyConstructor[EdgeProp] | None = None,
+    ) -> None:
+        """Construct an asymmetric directed multi-graph.
+
+        :param storage: A :class:`GraphStorage` class to back this graph.
+            It is instantiated with ``(n, _MultiGraphEdgeMonad)`` so every
+            ``(source, destination)`` cell can accumulate multiple
+            parallel edges.
+        :param vertices: Either an integer count (vertices are
+            auto-generated as ``Vertex(0)`` through ``Vertex(n-1)``), or
+            an explicit iterable of :class:`Vertex` objects.
+        :param edges: An optional iterable of :class:`Edge` tuples to
+            insert.  Each edge is an ``(EdgeID, source, destination)``
+            triple.
+        :param vertex_property: A zero-argument factory called once per
+            vertex to produce its initial property value.  ``None`` means
+            properties default to ``None``.
+        :param edge_property: A zero-argument factory called once per
+            edge to produce its initial property value.  ``None`` means
+            properties default to ``None``.
+        """
+
+        def storage_provider(n: int) -> GraphStorage:
+            return storage(n, _MultiGraphEdgeMonad)
+
+        super().__init__(
+            storage=storage_provider,
+            vertices=vertices,
+            edges=edges,
+            vertex_property=vertex_property,
+            edge_property=edge_property,
         )

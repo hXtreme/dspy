@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, assert_type
 import pytest
 
 from dspy.graph import AsymmetricMultiDiGraph
-from dspy.graph.types import Edge, EdgeID, GraphStorageProvider, Vertex
+from dspy.graph.types import Edge, EdgeID, GraphStorage, Vertex
 
 if TYPE_CHECKING:
     from types import NoneType
@@ -18,24 +18,24 @@ if TYPE_CHECKING:
 class TestConstructEmpty:
     """Construct graphs with no vertices or edges."""
 
-    def test_default_args(self, storage: GraphStorageProvider) -> None:
+    def test_default_args(self, storage: type[GraphStorage]) -> None:
         """Graph with default args has no vertices or edges."""
         g = AsymmetricMultiDiGraph(storage)
         assert list(g.vertices()) == []
         assert list(g.edges()) == []
 
-    def test_zero_vertices(self, storage: GraphStorageProvider) -> None:
+    def test_zero_vertices(self, storage: type[GraphStorage]) -> None:
         """Graph with vertices=0 has no vertices or edges."""
         g = AsymmetricMultiDiGraph(storage, vertices=0)
         assert list(g.vertices()) == []
         assert list(g.edges()) == []
 
-    def test_empty_vertex_iterable(self, storage: GraphStorageProvider) -> None:
+    def test_empty_vertex_iterable(self, storage: type[GraphStorage]) -> None:
         """Graph from empty iterator has no vertices."""
         g = AsymmetricMultiDiGraph(storage, vertices=iter([]))
         assert list(g.vertices()) == []
 
-    def test_empty_edges(self, storage: GraphStorageProvider) -> None:
+    def test_empty_edges(self, storage: type[GraphStorage]) -> None:
         """Graph with explicit empty edges list has no edges."""
         g = AsymmetricMultiDiGraph(storage, vertices=3, edges=[])
         assert list(g.edges()) == []
@@ -44,13 +44,13 @@ class TestConstructEmpty:
 class TestConstructWithVertices:
     """Construct graphs with vertices but no edges."""
 
-    def test_int_vertices(self, storage: GraphStorageProvider) -> None:
+    def test_int_vertices(self, storage: type[GraphStorage]) -> None:
         """Integer vertex count creates that many vertices."""
         g = AsymmetricMultiDiGraph(storage, vertices=5)
         verts = list(g.vertices())
         assert len(verts) == 5
 
-    def test_iterable_vertices(self, storage: GraphStorageProvider) -> None:
+    def test_iterable_vertices(self, storage: type[GraphStorage]) -> None:
         """Explicit vertex iterable is preserved."""
         vs = [Vertex(10), Vertex(20), Vertex(30)]
         g = AsymmetricMultiDiGraph(storage, vertices=vs)
@@ -58,7 +58,7 @@ class TestConstructWithVertices:
         assert len(verts) == 3
         assert set(verts) == set(vs)
 
-    def test_generator_vertices(self, storage: GraphStorageProvider) -> None:
+    def test_generator_vertices(self, storage: type[GraphStorage]) -> None:
         """Generator of vertices is consumed and stored."""
         gen = (Vertex(i) for i in range(4))
         g = AsymmetricMultiDiGraph(storage, vertices=gen)
@@ -68,7 +68,7 @@ class TestConstructWithVertices:
 class TestConstructWithEdges:
     """Construct graphs with both vertices and edges."""
 
-    def test_single_edge(self, storage: GraphStorageProvider) -> None:
+    def test_single_edge(self, storage: type[GraphStorage]) -> None:
         """Graph with one edge reports it."""
         v0 = Vertex(0)
         v1 = Vertex(1)
@@ -77,7 +77,7 @@ class TestConstructWithEdges:
         edges = list(g.edges())
         assert len(edges) == 1
 
-    def test_multiple_edges(self, storage: GraphStorageProvider) -> None:
+    def test_multiple_edges(self, storage: type[GraphStorage]) -> None:
         """Graph with multiple edges between distinct vertex pairs."""
         v0, v1, v2 = (Vertex(i) for i in range(3))
         edges_in = [
@@ -89,7 +89,7 @@ class TestConstructWithEdges:
         edges_out = list(g.edges())
         assert len(edges_out) == 3
 
-    def test_parallel_edges(self, storage: GraphStorageProvider) -> None:
+    def test_parallel_edges(self, storage: type[GraphStorage]) -> None:
         """Multiple edges between same pair of vertices (multi-graph)."""
         v0, v1 = Vertex(0), Vertex(1)
         edges_in = [
@@ -104,7 +104,7 @@ class TestConstructWithEdges:
         assert out_ids == {EdgeID(0), EdgeID(1)}
         assert in_ids == {EdgeID(0), EdgeID(1)}
 
-    def test_self_loop(self, storage: GraphStorageProvider) -> None:
+    def test_self_loop(self, storage: type[GraphStorage]) -> None:
         """Self-loop edge from a vertex to itself."""
         v0 = Vertex(0)
         e = Edge((EdgeID(0), v0, v0))
@@ -114,7 +114,7 @@ class TestConstructWithEdges:
         assert len(list(g.outgoing_edges(v0))) == 1
         assert len(list(g.incoming_edges(v0))) == 1
 
-    def test_asymmetric_edges(self, storage: GraphStorageProvider) -> None:
+    def test_asymmetric_edges(self, storage: type[GraphStorage]) -> None:
         """Edge u->v does not imply v->u."""
         v0, v1 = Vertex(0), Vertex(1)
         e = Edge((EdgeID(0), v0, v1))
@@ -126,7 +126,7 @@ class TestConstructWithEdges:
 
     def test_edges_param_accepts_generator(
         self,
-        storage: GraphStorageProvider,
+        storage: type[GraphStorage],
     ) -> None:
         """edges= accepts any iterable, including a generator."""
         v0, v1 = Vertex(0), Vertex(1)
@@ -136,7 +136,7 @@ class TestConstructWithEdges:
 
     def test_vertices_iterable_multi_iteration(
         self,
-        storage: GraphStorageProvider,
+        storage: type[GraphStorage],
     ) -> None:
         """g.vertices() can be iterated more than once."""
         g = AsymmetricMultiDiGraph(storage, vertices=3)
@@ -146,7 +146,7 @@ class TestConstructWithEdges:
 
     def test_edges_returns_generator_single_shot(
         self,
-        storage: GraphStorageProvider,
+        storage: type[GraphStorage],
     ) -> None:
         """g.edges() returns a generator that exhausts after one pass."""
         v0, v1 = Vertex(0), Vertex(1)
@@ -158,7 +158,7 @@ class TestConstructWithEdges:
 
     def test_zero_vertices_with_edges_raises(
         self,
-        storage: GraphStorageProvider,
+        storage: type[GraphStorage],
     ) -> None:
         """vertices=0 paired with non-empty edges raises an index/key error."""
         e = Edge((EdgeID(0), Vertex(0), Vertex(1)))
@@ -169,7 +169,7 @@ class TestConstructWithEdges:
 class TestConstructWithProperties:
     """Construct graphs with vertex and edge properties."""
 
-    def test_vertex_property(self, storage: GraphStorageProvider) -> None:
+    def test_vertex_property(self, storage: type[GraphStorage]) -> None:
         """Vertex property factory is applied to each vertex."""
         v0 = Vertex(0)
         g: AsymmetricMultiDiGraph[dict[str, str]] = AsymmetricMultiDiGraph(
@@ -181,7 +181,7 @@ class TestConstructWithProperties:
         assert_type(prop, dict[str, str])
         assert prop == {"color": "red"}
 
-    def test_edge_property(self, storage: GraphStorageProvider) -> None:
+    def test_edge_property(self, storage: type[GraphStorage]) -> None:
         """Edge property factory is applied to each edge."""
         v0, v1 = Vertex(0), Vertex(1)
         e = Edge((EdgeID(0), v0, v1))
@@ -196,7 +196,7 @@ class TestConstructWithProperties:
         assert_type(prop, float)
         assert prop == 1.0
 
-    def test_default_none_properties(self, storage: GraphStorageProvider) -> None:
+    def test_default_none_properties(self, storage: type[GraphStorage]) -> None:
         """Without property factories, properties default to None."""
         v0, v1 = Vertex(0), Vertex(1)
         e = Edge((EdgeID(0), v0, v1))
@@ -207,7 +207,7 @@ class TestConstructWithProperties:
 
     def test_each_vertex_gets_own_property(
         self,
-        storage: GraphStorageProvider,
+        storage: type[GraphStorage],
     ) -> None:
         """Property factory called per-vertex, not shared."""
         v0, v1 = Vertex(0), Vertex(1)
@@ -222,7 +222,7 @@ class TestConstructWithProperties:
 
     def test_each_edge_gets_own_property(
         self,
-        storage: GraphStorageProvider,
+        storage: type[GraphStorage],
     ) -> None:
         """Property factory called per-edge, not shared."""
         v0, v1 = Vertex(0), Vertex(1)
@@ -245,7 +245,7 @@ class TestConstructWithProperties:
 class TestConnectivity:
     """Verify incoming_edges / outgoing_edges / edges(vertex=...) contracts."""
 
-    def test_incoming_edges_single(self, storage: GraphStorageProvider) -> None:
+    def test_incoming_edges_single(self, storage: type[GraphStorage]) -> None:
         """incoming_edges returns the sole arriving edge."""
         v0, v1 = Vertex(0), Vertex(1)
         e = Edge((EdgeID(0), v0, v1))
@@ -257,7 +257,7 @@ class TestConnectivity:
         assert src == v0, str(g)
         assert dst == v1
 
-    def test_incoming_edges_empty(self, storage: GraphStorageProvider) -> None:
+    def test_incoming_edges_empty(self, storage: type[GraphStorage]) -> None:
         """Vertex with no inbound edges yields an empty iterable."""
         v0, v1 = Vertex(0), Vertex(1)
         g = AsymmetricMultiDiGraph(storage, vertices=[v0, v1])
@@ -265,7 +265,7 @@ class TestConnectivity:
 
     def test_parallel_incoming_outgoing(
         self,
-        storage: GraphStorageProvider,
+        storage: type[GraphStorage],
     ) -> None:
         """Parallel edges show up on both ends of the connection."""
         v0, v1 = Vertex(0), Vertex(1)
@@ -281,7 +281,7 @@ class TestConnectivity:
 
     def test_self_loop_in_both_directions(
         self,
-        storage: GraphStorageProvider,
+        storage: type[GraphStorage],
     ) -> None:
         """A self-loop appears in both incoming and outgoing edges."""
         v0 = Vertex(0)
@@ -292,7 +292,7 @@ class TestConnectivity:
 
     def test_edges_filtered_by_vertex(
         self,
-        storage: GraphStorageProvider,
+        storage: type[GraphStorage],
     ) -> None:
         """edges(vertex=v) returns only edges departing from v."""
         v0, v1, v2 = (Vertex(i) for i in range(3))
@@ -311,7 +311,7 @@ class TestConnectivity:
 
     def test_edges_no_filter_matches_all(
         self,
-        storage: GraphStorageProvider,
+        storage: type[GraphStorage],
     ) -> None:
         """edges() without a vertex argument returns every edge."""
         v0, v1 = Vertex(0), Vertex(1)
@@ -325,7 +325,7 @@ class TestPropertyAccess:
 
     def test_property_invalid_item_raises_type_error(
         self,
-        storage: GraphStorageProvider,
+        storage: type[GraphStorage],
     ) -> None:
         """Passing a non-Vertex / non-Edge value raises TypeError."""
         g = AsymmetricMultiDiGraph(storage, vertices=1)
@@ -334,7 +334,7 @@ class TestPropertyAccess:
 
     def test_property_mutation_persists(
         self,
-        storage: GraphStorageProvider,
+        storage: type[GraphStorage],
     ) -> None:
         """Mutations through a returned property are visible on re-read."""
         v0 = Vertex(0)
@@ -348,7 +348,7 @@ class TestPropertyAccess:
 
     def test_property_unknown_vertex_raises(
         self,
-        storage: GraphStorageProvider,
+        storage: type[GraphStorage],
     ) -> None:
         """Looking up a vertex not in the graph raises KeyError."""
         g = AsymmetricMultiDiGraph(storage, vertices=1)
@@ -357,7 +357,7 @@ class TestPropertyAccess:
 
     def test_property_unknown_edge_raises(
         self,
-        storage: GraphStorageProvider,
+        storage: type[GraphStorage],
     ) -> None:
         """Looking up an edge not in the graph raises KeyError."""
         g = AsymmetricMultiDiGraph(storage, vertices=1)
@@ -367,7 +367,7 @@ class TestPropertyAccess:
 
     def test_property_factory_call_count(
         self,
-        storage: GraphStorageProvider,
+        storage: type[GraphStorage],
     ) -> None:
         """Vertex property factory is called exactly once per vertex."""
         calls = 0
@@ -398,7 +398,7 @@ class TestNonContiguousVertices:
 
     def test_edges_with_non_contiguous_labels(
         self,
-        storage: GraphStorageProvider,
+        storage: type[GraphStorage],
     ) -> None:
         """Edge between labelled vertices should round-trip intact."""
         v10, v20, v30 = (Vertex(i) for i in (10, 20, 30))
@@ -424,7 +424,7 @@ class TestInvalidEdgeInputs:
 
     def test_duplicate_edge_id_rejected(
         self,
-        storage: GraphStorageProvider,
+        storage: type[GraphStorage],
     ) -> None:
         """Constructing with a duplicate EdgeID should raise KeyError."""
         v0, v1 = Vertex(0), Vertex(1)
@@ -441,7 +441,7 @@ class TestInvalidEdgeInputs:
 
     def test_edge_with_unknown_vertex_rejected(
         self,
-        storage: GraphStorageProvider,
+        storage: type[GraphStorage],
     ) -> None:
         """Edge whose endpoint is not in vertices= should raise KeyError."""
         v0 = Vertex(0)
