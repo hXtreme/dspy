@@ -8,6 +8,7 @@ with optional per-vertex and per-edge properties.
 :license: MIT, see LICENSE.txt for details.
 """
 
+import textwrap
 import typing
 from collections.abc import Iterable
 from types import NoneType
@@ -18,6 +19,7 @@ from dspy.graph.types import (
     EdgeID,
     EdgeMonad,
     Graph,
+    GraphStorage,
     GraphStorageProvider,
     PropertyConstructor,
     Vertex,
@@ -36,21 +38,14 @@ class _MultiGraphEdgeMonad(EdgeMonad):
 
     _e: set[EdgeID]
 
-    def __init__(self, e: EdgeID) -> None:
-        """Initialise the monad with a single edge identifier.
+    def __init__(self, e: EdgeID | set[EdgeID]) -> None:
+        """Initialise the monad with one or more edge identifiers.
 
-        :param e: The first edge identifier for this vertex pair.
+        :param e: Either a single :class:`EdgeID` (wrapped into a new
+            one-element set) or an existing set of edge identifiers that
+            is adopted directly.
         """
-        self._e = {e}
-
-    @classmethod
-    def bind(cls, e: EdgeID) -> Self:
-        """Create a new monad containing a single edge identifier.
-
-        :param e: The initial edge identifier.
-        :return: A fresh :class:`_MultiGraphEdgeMonad` wrapping *e*.
-        """
-        return cls(e)
+        self._e = e if isinstance(e, set) else {e}
 
     def chain(self, e: EdgeID) -> Self:
         """Add an additional edge identifier to this monad.
@@ -67,6 +62,13 @@ class _MultiGraphEdgeMonad(EdgeMonad):
         :return: A :class:`frozenset` of every :class:`EdgeID` in this monad.
         """
         return frozenset(self._e)
+
+    def __str__(self) -> str:
+        """Return the ``repr`` of the underlying edge-identifier set.
+
+        :return: The Python ``repr`` of the internal ``set[EdgeID]``.
+        """
+        return repr(self._e)
 
 
 def _none_property() -> None:
@@ -98,9 +100,14 @@ class AsymmetricMultiDiGraph[VertexProp = NoneType, EdgeProp = NoneType](
         :class:`NoneType`).
     """
 
-    __vertices: dict[Vertex, tuple[VertexID, VertexProp]]
-    __edges: dict[EdgeID, EdgeProp]
+    __vertices: dict[Vertex, VertexID]
+    __edges: dict[EdgeID, Edge]
     __inv_vertices: dict[VertexID, Vertex]
+    __storage: GraphStorage[_MultiGraphEdgeMonad]
+    __vertex_properties: dict[Vertex, VertexProp]
+    __edge_properties: dict[EdgeID, EdgeProp]
+    __vertex_property_constructor: PropertyConstructor[VertexProp]
+    __edge_property_constructor: PropertyConstructor[EdgeProp]
 
     def __init__(
         self,
@@ -115,7 +122,7 @@ class AsymmetricMultiDiGraph[VertexProp = NoneType, EdgeProp = NoneType](
         :param storage: A callable that creates a :class:`GraphStorage` backend
             given a vertex count and the :class:`_MultiGraphEdgeMonad` type.
         :param vertices: Either an integer count (vertices are auto-generated as
-            ``Vertex(VertexID(0))`` through ``Vertex(VertexID(n-1))``), or an
+            ``Vertex(0)`` through ``Vertex(n-1)``), or an
             explicit iterable of :class:`Vertex` objects.
         :param edges: An optional iterable of :class:`Edge` tuples to insert.
             Each edge is an ``(EdgeID, source, destination)`` triple.
@@ -127,7 +134,7 @@ class AsymmetricMultiDiGraph[VertexProp = NoneType, EdgeProp = NoneType](
             to ``None``.
         """
         if isinstance(vertices, int):
-            vertices = (Vertex(VertexID(i)) for i in range(vertices))
+            vertices = (Vertex(i) for i in range(vertices))
         if vertex_property is None:
             if TYPE_CHECKING:
                 assert VertexProp is NoneType
@@ -137,16 +144,51 @@ class AsymmetricMultiDiGraph[VertexProp = NoneType, EdgeProp = NoneType](
                 assert EdgeProp is NoneType
             edge_property = _none_property
 
-        self.__vertices = {
-            v: (VertexID(v_id), vertex_property()) for v_id, v in enumerate(vertices)
+        self.__vertex_property_constructor = vertex_property
+        self.__edge_property_constructor = edge_property
+
+        self.__vertices = {v: VertexID(v_id) for v_id, v in enumerate(vertices)}
+        self.__inv_vertices = {v: k for k, v in self.__vertices.items()}
+        self.__vertex_properties = {
+            v: self.__vertex_property_constructor() for v in self.__vertices
         }
-        self.__inv_vertices = {v: k for k, (v, _) in self.__vertices.items()}
+
         self.__storage = storage(len(self.__vertices), _MultiGraphEdgeMonad)
-        self.__edges = {}
+        self.__edges: dict[EdgeID, Edge] = {}
         for edge in edges or ():
-            edge_id, u, v = edge
-            self.__storage.update_edge(u, v, edge_id)
-            self.__edges[edge_id] = edge_property()
+            self._add_edge(edge)
+        self.__edge_properties = {
+            e: self.__edge_property_constructor() for e in self.__edges
+        }
+
+    def _add_edge(self, edge: Edge) -> None:
+        """Validate *edge* and record it in storage and the edge table.
+
+        :param edge: The ``(EdgeID, source, destination)`` triple to add.
+        :raises KeyError: If an edge with the same :class:`EdgeID` already
+            exists, or if either *source* or *destination* is not a vertex
+            of this graph.
+        """
+        edge_id, u, v = edge
+        if existing := self.__edges.get(edge_id):
+            error_msg = (
+                f"Edge already exists: Faild to add Edge{edge!r}, "
+                f"there is already an Edge{existing!r} with the same id"
+            )
+            raise KeyError(error_msg)
+        if u not in self.__vertices:
+            error_msg = (
+                f"Unknown Vertex: source Vertex({u}) is not present in the graph"
+            )
+            raise KeyError(error_msg)
+        if v not in self.__vertices:
+            error_msg = (
+                f"Unknown Vertex: destination Vertex({v}) is not present in the graph"
+            )
+            raise KeyError(error_msg)
+
+        self.__storage.update_edge(self.__vertices[u], self.__vertices[v], edge_id)
+        self.__edges[edge_id] = edge
 
     # Building blocks
     def vertices(self) -> Iterable[Vertex]:
@@ -168,7 +210,7 @@ class AsymmetricMultiDiGraph[VertexProp = NoneType, EdgeProp = NoneType](
         :return: An iterable of :class:`Edge` tuples ``(EdgeID, source, dest)``.
         """
         raw_edges = (
-            self.__storage.outgoing_edges(vertex)
+            self.__storage.outgoing_edges(self.__vertices[vertex])
             if vertex is not None
             else self.__storage.edges()
         )
@@ -183,7 +225,7 @@ class AsymmetricMultiDiGraph[VertexProp = NoneType, EdgeProp = NoneType](
         :param vertex: The target vertex.
         :return: An iterable of :class:`Edge` tuples arriving at *vertex*.
         """
-        raw_edges = self.__storage.incoming_edges(vertex)
+        raw_edges = self.__storage.incoming_edges(self.__vertices[vertex])
         yield from (
             (e, self.__inv_vertices[u], self.__inv_vertices[v]) for u, v, e in raw_edges
         )
@@ -194,7 +236,7 @@ class AsymmetricMultiDiGraph[VertexProp = NoneType, EdgeProp = NoneType](
         :param vertex: The source vertex.
         :return: An iterable of :class:`Edge` tuples departing from *vertex*.
         """
-        raw_edges = self.__storage.outgoing_edges(vertex)
+        raw_edges = self.__storage.outgoing_edges(self.__vertices[vertex])
         yield from (
             (e, self.__inv_vertices[u], self.__inv_vertices[v]) for u, v, e in raw_edges
         )
@@ -212,13 +254,67 @@ class AsymmetricMultiDiGraph[VertexProp = NoneType, EdgeProp = NoneType](
             property should be returned.
         :return: The *VertexProp* value when *item* is a vertex, or the
             *EdgeProp* value when *item* is an edge.
+        :raises KeyError: If *item* is a vertex or edge that is not part
+            of this graph.
         :raises TypeError: If *item* is neither a vertex nor an edge.
         """
         if isinstance(item, tuple):
-            return self.__edges[item[0]]
+            return self.__edge_properties[item[0]]
         if isinstance(item, int):
-            return self.__vertices[item][1]
+            return self.__vertex_properties[item]
         error_msg = (
             f"Unexpected item of type {type(item)}, should be either Vertex or Edge"
         )
         raise TypeError(error_msg)
+
+    def __str__(self) -> str:
+        """Return a multi-line human-readable summary of the graph.
+
+        The output lists each vertex (with its :class:`VertexID` and,
+        when present, its property) followed by every edge and the
+        backing storage's own ``str`` representation.
+
+        :return: A formatted, indented description of the graph.
+        """
+        graph_id = id(self)
+
+        compact_vertices = self.__vertex_property_constructor() is None
+        vertices_joiner = ", " if compact_vertices else "\n"
+        vertices = vertices_joiner.join(
+            [
+                f"Vertex({u}) <-> VertexID({u_id})"
+                if compact_vertices
+                else (
+                    f"(Vertex({u}) <-> VertexID({u_id}), {self.__vertex_properties[u]})"
+                )
+                for u, u_id in self.__vertices.items()
+            ]
+        )
+        if not compact_vertices:
+            vertices = "\n" + textwrap.indent(vertices, "    ") + "\n"
+
+        compact_edges = self.__edge_property_constructor() is None
+        edges_joiner = ", " if compact_edges else "\n"
+        edges = edges_joiner.join(
+            [
+                str((f"EdgeID({edge})", prop) if prop else f"EdgeID({edge})")
+                for edge, prop in self.__edges.items()
+            ]
+        )
+        if not compact_edges:
+            edges = "\n" + textwrap.indent(edges, "        ")
+
+        storage = textwrap.indent(str(self.__storage), "    ")
+        return textwrap.dedent(
+            """
+            Graph (id={graph_id})
+                Vertices: {vertices}
+                Edges: {edges}
+            {storage}
+            """
+        ).format(
+            graph_id=graph_id,
+            vertices=vertices,
+            edges=edges,
+            storage=storage,
+        )

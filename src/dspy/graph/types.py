@@ -9,6 +9,7 @@ high-level :class:`Graph` protocol that concrete graph classes implement.
 :license: MIT, see LICENSE.txt for details.
 """
 
+import textwrap
 import typing
 from collections.abc import Callable, Iterable, Iterator
 from typing import NewType, Protocol, Self
@@ -16,7 +17,7 @@ from typing import NewType, Protocol, Self
 VertexID = NewType("VertexID", int)
 EdgeID = NewType("EdgeID", int)
 
-Vertex = NewType("Vertex", VertexID)
+Vertex = NewType("Vertex", int)
 Edge = NewType("Edge", tuple[EdgeID, Vertex, Vertex])
 
 
@@ -34,6 +35,19 @@ class EdgeMonad(Protocol):
     * :meth:`unwrap` extracts the accumulated edge identifiers.
     """
 
+    def __init__(self, e: EdgeID | Self) -> None:
+        """Initialise the monad from an edge identifier or an existing monad.
+
+        Implementations decide whether *e* is wrapped into a new
+        single-element container or, when *e* is already an
+        :class:`EdgeMonad` of the same type, copied/adopted to seed the
+        new instance.
+
+        :param e: Either a single :class:`EdgeID` to wrap, or an existing
+            :class:`EdgeMonad` whose contents seed the new monad.
+        """
+        ...
+
     @classmethod
     def bind(cls, e: EdgeID) -> Self:
         """Create a new monad containing a single edge identifier.
@@ -41,7 +55,7 @@ class EdgeMonad(Protocol):
         :param e: The initial edge identifier.
         :return: A new :class:`EdgeMonad` instance wrapping *e*.
         """
-        ...
+        return cls(e)
 
     def chain(self, e: EdgeID) -> Self:
         """Append an additional edge identifier to this monad.
@@ -177,6 +191,24 @@ class GraphStorage[EM: EdgeMonad](Protocol):
     ) -> Iterable[tuple[VertexID, VertexID, EdgeID]]:
         return ((u, v, e) for e in em.unwrap())
 
+    def __str__(self) -> str:
+        """Return the string reperesentation of the graph."""
+        graph_id = id(self)
+        vertices = set(self.vertices())
+        edges = textwrap.indent(
+            "\n".join([f"{u} --> {v}: {em!s}" for u, v, em in self._edges()]),
+            "        ",
+        )
+
+        return textwrap.dedent(
+            """
+            GraphStorage (id={graph_id})
+                Vertices: {vertices}
+                Edges:
+            {edges}
+            """
+        ).format(graph_id=graph_id, vertices=vertices, edges=edges)
+
 
 type GraphStorageProvider[EM: EdgeMonad] = Callable[[int, type[EM]], GraphStorage[EM]]
 
@@ -263,3 +295,8 @@ class Graph[EM: EdgeMonad, VertexProp = None, EdgeProp = None](Protocol):
     def property(self, item: Vertex) -> VertexProp: ...
     @typing.overload
     def property(self, item: Edge) -> EdgeProp: ...
+
+    # Magic Methods
+    def __str__(self) -> str:
+        """Return the string reperesentation of the graph."""
+        ...
